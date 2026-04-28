@@ -199,7 +199,7 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
 
     const rsiSeries = chart.addLineSeries({
       color: COLORS.rsiLine,
-      lineWidth: 1.5,
+      lineWidth: 2,
       priceFormat: { type: "custom", formatter: (v: number) => v.toFixed(1) },
     });
 
@@ -425,12 +425,12 @@ function addLineSeries(
   data: IndicatorRow[],
   field: keyof IndicatorRow,
   color: string,
-  lineWidth: number = 1,
+  lineWidth: 1 | 2 | 3 | 4 = 1,
   lineStyle: LineStyle = LineStyle.Solid
 ) {
   const series = chart.addLineSeries({
     color,
-    lineWidth: lineWidth as 1 | 2 | 3 | 4,
+    lineWidth,
     lineStyle,
     crosshairMarkerVisible: false,
     lastValueVisible: false,
