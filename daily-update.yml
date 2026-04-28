@@ -1,0 +1,36 @@
+name: Daily Stock Data Update
+
+on:
+  schedule:
+    # 美東時間每天 21:00 UTC(美股收盤後 3 小時,確保資料齊全)
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch:  # 允許手動在 GitHub UI 觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: worker/requirements.txt
+
+      - name: Install dependencies
+        working-directory: worker
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run worker
+        working-directory: worker
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python run.py
