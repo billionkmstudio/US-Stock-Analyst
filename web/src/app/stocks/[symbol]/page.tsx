@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-server";
-import { PriceChart } from "@/components/PriceChart";
+import { CandlestickChart } from "@/components/CandlestickChart";
 
 export default async function StockDetailPage({
   params,
@@ -10,15 +10,23 @@ export default async function StockDetailPage({
   const symbol = params.symbol.toUpperCase();
   const supabase = createClient();
 
-  // 拉最近 6 個月日線
+  // 拉最近 2 年日線(ALL 模式需要)
   const { data: prices } = await supabase
     .from("daily_prices")
-    .select("date, close, open, high, low, volume")
+    .select("date, open, high, low, close, volume")
     .eq("symbol", symbol)
-    .order("date", { ascending: false })
-    .limit(180);
+    .order("date", { ascending: true })
+    .limit(600);
 
-  // 拉最新一筆基本面
+  // 拉指標
+  const { data: indicators } = await supabase
+    .from("daily_indicators")
+    .select("date, sma_20, sma_50, sma_200, bb_upper, bb_middle, bb_lower, rsi_14, macd, macd_signal, macd_histogram")
+    .eq("symbol", symbol)
+    .order("date", { ascending: true })
+    .limit(600);
+
+  // 最新基本面
   const { data: fundList } = await supabase
     .from("fundamentals")
     .select("*")
@@ -28,112 +36,183 @@ export default async function StockDetailPage({
 
   const fund = fundList?.[0];
 
-  // 拉最近一日的指標
-  const { data: indList } = await supabase
-    .from("daily_indicators")
-    .select("*")
-    .eq("symbol", symbol)
-    .order("date", { ascending: false })
-    .limit(1);
+  // 最新指標
+  const latestInd = indicators?.[indicators.length - 1];
 
-  const ind = indList?.[0];
-
-  const chartData = (prices || []).slice().reverse().map((p) => ({
+  const priceData = (prices || []).map((p) => ({
     date: p.date,
-    close: p.close,
+    open: Number(p.open),
+    high: Number(p.high),
+    low: Number(p.low),
+    close: Number(p.close),
+    volume: Number(p.volume),
+  }));
+
+  const indicatorData = (indicators || []).map((d) => ({
+    date: d.date,
+    sma_20: d.sma_20 != null ? Number(d.sma_20) : null,
+    sma_50: d.sma_50 != null ? Number(d.sma_50) : null,
+    sma_200: d.sma_200 != null ? Number(d.sma_200) : null,
+    bb_upper: d.bb_upper != null ? Number(d.bb_upper) : null,
+    bb_middle: d.bb_middle != null ? Number(d.bb_middle) : null,
+    bb_lower: d.bb_lower != null ? Number(d.bb_lower) : null,
+    rsi_14: d.rsi_14 != null ? Number(d.rsi_14) : null,
+    macd: d.macd != null ? Number(d.macd) : null,
+    macd_signal: d.macd_signal != null ? Number(d.macd_signal) : null,
+    macd_histogram: d.macd_histogram != null ? Number(d.macd_histogram) : null,
   }));
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-6">
       <Link
         href="/"
-        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+        className="inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors"
       >
         ← 回到自選股
       </Link>
 
-      <h1 className="text-2xl font-medium mt-4 mb-6">{symbol}</h1>
-
-      {chartData.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center text-gray-500">
-          尚無資料,等下次 worker 跑完(每日美東收盤後)
+      {priceData.length === 0 ? (
+        <div className="mt-8 bg-gray-800 rounded-xl p-12 text-center text-gray-400">
+          尚無 {symbol} 的資料,請等下次 Worker 跑完
         </div>
       ) : (
         <>
-          {/* 價格圖 */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
-            <h2 className="text-base font-medium mb-3">收盤價(近 180 日)</h2>
-            <PriceChart data={chartData} />
+          {/* K 線圖 */}
+          <div className="mt-4">
+            <CandlestickChart
+              priceData={priceData}
+              indicatorData={indicatorData}
+              symbol={symbol}
+            />
           </div>
 
-          {/* 指標摘要 */}
-          {ind && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-6">
-              <h2 className="text-base font-medium mb-3">技術指標(最新)</h2>
-              <Stats
-                items={[
-                  { label: "SMA 20", value: fmt(ind.sma_20) },
-                  { label: "SMA 50", value: fmt(ind.sma_50) },
-                  { label: "SMA 200", value: fmt(ind.sma_200) },
-                  { label: "RSI 14", value: fmt(ind.rsi_14, 1) },
-                  { label: "MACD", value: fmt(ind.macd, 3) },
-                  { label: "ATR 14", value: fmt(ind.atr_14, 2) },
-                ]}
-              />
-            </div>
-          )}
+          {/* 指標與基本面 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            {/* 技術指標 */}
+            {latestInd && (
+              <div className="bg-[#0a0e17] border border-gray-800 rounded-xl p-5">
+                <h2 className="text-sm font-medium text-gray-400 mb-4 tracking-wide uppercase">
+                  技術指標
+                </h2>
+                <div className="grid grid-cols-3 gap-4">
+                  <Stat label="SMA 20" value={fmt(latestInd.sma_20)} />
+                  <Stat label="SMA 50" value={fmt(latestInd.sma_50)} />
+                  <Stat label="SMA 200" value={fmt(latestInd.sma_200)} />
+                  <Stat
+                    label="RSI 14"
+                    value={fmt(latestInd.rsi_14, 1)}
+                    color={rsiColor(latestInd.rsi_14)}
+                  />
+                  <Stat label="MACD" value={fmt(latestInd.macd, 3)} />
+                  <Stat label="BB 寬度" value={
+                    latestInd.bb_upper && latestInd.bb_lower && latestInd.bb_middle
+                      ? ((Number(latestInd.bb_upper) - Number(latestInd.bb_lower)) / Number(latestInd.bb_middle) * 100).toFixed(1) + "%"
+                      : "—"
+                  } />
+                </div>
 
-          {/* 基本面摘要 */}
-          {fund && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-              <h2 className="text-base font-medium mb-3">基本面快照</h2>
-              <Stats
-                items={[
-                  { label: "PE", value: fmt(fund.pe_ratio, 1) },
-                  { label: "Forward PE", value: fmt(fund.forward_pe, 1) },
-                  { label: "PEG", value: fmt(fund.peg_ratio, 2) },
-                  { label: "PB", value: fmt(fund.pb_ratio, 2) },
-                  { label: "ROE", value: fmtPct(fund.roe) },
-                  { label: "毛利率", value: fmtPct(fund.profit_margin) },
-                  { label: "股息殖利率", value: fmtPct(fund.dividend_yield) },
-                  { label: "市值", value: fmtBig(fund.market_cap) },
-                ]}
-              />
-            </div>
-          )}
+                {/* RSI 狀態條 */}
+                {latestInd.rsi_14 != null && (
+                  <div className="mt-4">
+                    <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                      <span>超賣 30</span>
+                      <span>RSI {Number(latestInd.rsi_14).toFixed(1)}</span>
+                      <span>超買 70</span>
+                    </div>
+                    <div className="h-1.5 bg-gray-800 rounded-full relative overflow-hidden">
+                      <div className="absolute left-0 top-0 h-full w-[30%] bg-green-900/40 rounded-l-full" />
+                      <div className="absolute right-0 top-0 h-full w-[30%] bg-red-900/40 rounded-r-full" />
+                      <div
+                        className="absolute top-0 h-full w-1.5 bg-amber-400 rounded-full -translate-x-1/2"
+                        style={{ left: `${Math.min(Math.max(Number(latestInd.rsi_14), 0), 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 基本面 */}
+            {fund && (
+              <div className="bg-[#0a0e17] border border-gray-800 rounded-xl p-5">
+                <h2 className="text-sm font-medium text-gray-400 mb-4 tracking-wide uppercase">
+                  基本面
+                </h2>
+                <div className="grid grid-cols-3 gap-4">
+                  <Stat label="PE" value={fmt(fund.pe_ratio, 1)} />
+                  <Stat label="Forward PE" value={fmt(fund.forward_pe, 1)} />
+                  <Stat label="PEG" value={fmt(fund.peg_ratio, 2)} />
+                  <Stat label="PB" value={fmt(fund.pb_ratio, 2)} />
+                  <Stat label="ROE" value={fmtPct(fund.roe)} />
+                  <Stat label="淨利率" value={fmtPct(fund.profit_margin)} />
+                  <Stat label="營收成長" value={fmtPct(fund.revenue_growth)} color={pctColor(fund.revenue_growth)} />
+                  <Stat label="殖利率" value={fmtPct(fund.dividend_yield)} />
+                  <Stat label="市值" value={fmtBig(fund.market_cap)} />
+                </div>
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>
   );
 }
 
-function Stats({ items }: { items: { label: string; value: string }[] }) {
+// ==============================
+// 小元件
+// ==============================
+
+function Stat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
   return (
-    <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      {items.map((it) => (
-        <div key={it.label}>
-          <dt className="text-xs text-gray-500 dark:text-gray-400">{it.label}</dt>
-          <dd className="text-base mt-1">{it.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div>
+      <dt className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</dt>
+      <dd className={`text-sm mt-0.5 font-medium ${color || "text-gray-200"}`}>
+        {value}
+      </dd>
+    </div>
   );
 }
 
+// ==============================
+// 格式化工具
+// ==============================
+
 function fmt(v: number | null | undefined, decimals = 2): string {
   if (v == null) return "—";
-  return v.toFixed(decimals);
+  return Number(v).toFixed(decimals);
 }
 
 function fmtPct(v: number | null | undefined): string {
   if (v == null) return "—";
-  return (v * 100).toFixed(2) + "%";
+  return (Number(v) * 100).toFixed(2) + "%";
 }
 
 function fmtBig(v: number | null | undefined): string {
   if (v == null) return "—";
-  if (v >= 1e12) return (v / 1e12).toFixed(2) + "T";
-  if (v >= 1e9) return (v / 1e9).toFixed(2) + "B";
-  if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
-  return v.toFixed(0);
+  const n = Number(v);
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  return n.toFixed(0);
+}
+
+function rsiColor(v: number | null | undefined): string {
+  if (v == null) return "";
+  const n = Number(v);
+  if (n >= 70) return "text-red-400";
+  if (n <= 30) return "text-green-400";
+  return "text-amber-400";
+}
+
+function pctColor(v: number | null | undefined): string {
+  if (v == null) return "";
+  return Number(v) >= 0 ? "text-green-400" : "text-red-400";
 }
