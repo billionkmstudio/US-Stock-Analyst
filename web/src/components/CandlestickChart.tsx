@@ -168,9 +168,9 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
 
     // 疊加指標
     if (overlay === "sma") {
-      addLineSeries(chart, filteredIndicators, "sma_20", COLORS.sma20, 1.5);
-      addLineSeries(chart, filteredIndicators, "sma_50", COLORS.sma50, 1.5);
-      addLineSeries(chart, filteredIndicators, "sma_200", COLORS.sma200, 1.5);
+      addLineSeries(chart, filteredIndicators, "sma_20", COLORS.sma20, 2);
+      addLineSeries(chart, filteredIndicators, "sma_50", COLORS.sma50, 2);
+      addLineSeries(chart, filteredIndicators, "sma_200", COLORS.sma200, 2);
     } else if (overlay === "bollinger") {
       addLineSeries(chart, filteredIndicators, "bb_upper", COLORS.bbUpper, 1, LineStyle.Dashed);
       addLineSeries(chart, filteredIndicators, "bb_middle", COLORS.sma20, 1);
@@ -248,9 +248,9 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
     histSeries.setData(histData);
 
     // MACD line
-    addLineSeries(chart, filteredIndicators, "macd", COLORS.macdLine, 1.5);
+    addLineSeries(chart, filteredIndicators, "macd", COLORS.macdLine, 2);
     // Signal line
-    addLineSeries(chart, filteredIndicators, "macd_signal", COLORS.macdSignal, 1.5);
+    addLineSeries(chart, filteredIndicators, "macd_signal", COLORS.macdSignal, 2);
 
     chart.timeScale().fitContent();
 
