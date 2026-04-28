@@ -1,4 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
@@ -12,7 +12,7 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
@@ -25,12 +25,10 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // 觸發 session 刷新
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // 未登入且不在登入頁 → 導去登入
   const path = request.nextUrl.pathname;
   if (!user && !path.startsWith("/login") && !path.startsWith("/auth")) {
     const url = request.nextUrl.clone();
