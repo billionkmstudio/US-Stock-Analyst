@@ -1,16 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
-import dynamic from "next/dynamic";
 import ExpertPanel from "@/components/ExpertPanel";
-
-// 修正：用 .then(mod => mod.default) 解決 Next.js 14 dynamic() 型別推斷問題
-const CandlestickChart = dynamic<{ symbol: string }>(
-  () => import("@/components/CandlestickChart").then((mod) => mod.default),
-  { ssr: false, loading: () => <ChartSkeleton /> }
-);
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,6 +24,16 @@ export default function StockDetailPage() {
 
   const [stockInfo, setStockInfo] = useState<StockInfo | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // 手動延遲載入 CandlestickChart（避開 next/dynamic 型別問題）
+  const [ChartComponent, setChartComponent] =
+    useState<ComponentType<{ symbol: string }> | null>(null);
+
+  useEffect(() => {
+    import("@/components/CandlestickChart").then((mod) => {
+      setChartComponent(() => mod.default);
+    });
+  }, []);
 
   useEffect(() => {
     async function loadBasicInfo() {
@@ -95,7 +98,13 @@ export default function StockDetailPage() {
 
       {/* ── K 線圖 ── */}
       <section>
-        <CandlestickChart symbol={symbol} />
+        {ChartComponent ? (
+          <ChartComponent symbol={symbol} />
+        ) : (
+          <div className="w-full h-[400px] rounded-xl bg-zinc-100 dark:bg-zinc-800 animate-pulse flex items-center justify-center">
+            <span className="text-sm text-zinc-400">K 線圖載入中...</span>
+          </div>
+        )}
       </section>
 
       {/* ── 專家策略建議面板 ── */}
@@ -106,14 +115,6 @@ export default function StockDetailPage() {
         </h2>
         <ExpertPanel symbol={symbol} />
       </section>
-    </div>
-  );
-}
-
-function ChartSkeleton() {
-  return (
-    <div className="w-full h-[400px] rounded-xl bg-zinc-100 dark:bg-zinc-800 animate-pulse flex items-center justify-center">
-      <span className="text-sm text-zinc-400">K 線圖載入中...</span>
     </div>
   );
 }
