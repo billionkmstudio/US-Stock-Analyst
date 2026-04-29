@@ -25,13 +25,15 @@ export default function StockDetailPage() {
   const [stockInfo, setStockInfo] = useState<StockInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 手動延遲載入 CandlestickChart（避開 next/dynamic 型別問題）
+  // 手動延遲載入 CandlestickChart（避開 SSR 問題）
   const [ChartComponent, setChartComponent] =
     useState<ComponentType<{ symbol: string }> | null>(null);
 
   useEffect(() => {
     import("@/components/CandlestickChart").then((mod) => {
-      setChartComponent(() => mod.default);
+      // 相容 default export 和 named export 兩種寫法
+      const Comp = (mod as any).default || (mod as any).CandlestickChart;
+      if (Comp) setChartComponent(() => Comp);
     });
   }, []);
 
@@ -118,5 +120,6 @@ export default function StockDetailPage() {
     </div>
   );
 }
+
 
 
