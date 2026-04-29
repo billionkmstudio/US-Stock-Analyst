@@ -1,21 +1,14 @@
 "use client";
 
-// ============================================
-// 個股詳情頁 — 整合版
-// ============================================
-// 上方：K 線圖（已有的 CandlestickChart）
-// 下方：專家策略建議面板（新增）
-// ============================================
-
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import dynamic from "next/dynamic";
 import ExpertPanel from "@/components/ExpertPanel";
 
-// 動態載入 K 線圖避免 SSR 問題（lightweight-charts 依賴 window）
-const CandlestickChart = dynamic(
-  () => import("@/components/CandlestickChart"),
+// 修正：用 .then(mod => mod.default) 解決 Next.js 14 dynamic() 型別推斷問題
+const CandlestickChart = dynamic<{ symbol: string }>(
+  () => import("@/components/CandlestickChart").then((mod) => mod.default),
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
@@ -57,7 +50,7 @@ export default function StockDetailPage() {
 
         setStockInfo({
           symbol,
-          name: symbol, // 可從 fundamentals 取得公司名
+          name: symbol,
           price: latest.close,
           change,
           changePct,
@@ -117,7 +110,6 @@ export default function StockDetailPage() {
   );
 }
 
-/** K 線圖載入骨架 */
 function ChartSkeleton() {
   return (
     <div className="w-full h-[400px] rounded-xl bg-zinc-100 dark:bg-zinc-800 animate-pulse flex items-center justify-center">
