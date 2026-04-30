@@ -1,8 +1,5 @@
 // ============================================
-// 綜合決策聚合器
-// ============================================
-// 匯整所有專家判斷，加權投票，計算共識度，
-// 標出分歧理由，產生最終建議
+// 綜合決策聚合器（五位專家版）
 // ============================================
 
 import type {
@@ -13,29 +10,29 @@ import type {
 import { SIGNAL_SCORES } from "./expert-types";
 import { evaluateBuffett } from "./experts/buffett";
 import { evaluateHedgeFund } from "./experts/hedge-fund";
+import { evaluateDalio } from "./experts/dalio";
+import { evaluateARK } from "./experts/ark";
+import { evaluateAnalyst } from "./experts/analyst";
 
-// ── 專家權重（可調整）──────────────────────
+// ── 專家權重 ──────────────────────────────
 
 const EXPERT_WEIGHTS: Record<string, number> = {
   buffett_value: 1.0,
   hedge_quant: 1.0,
-  // 後續擴充：
-  // dalio_allweather: 1.0,
-  // ark_disruptive: 0.8,
-  // analyst_consensus: 0.7,
+  dalio_allweather: 1.0,
+  ark_disruptive: 0.8,       // 創新派偏激進，稍降權重
+  analyst_consensus: 0.9,    // 分析師有利益衝突，略降
 };
 
 // ── 執行所有專家評估 ────────────────────────
 
 export function runAllExperts(stock: StockSnapshot): ConsensusResult {
-  // 逐一執行每位專家
   const verdicts: ExpertVerdict[] = [
     evaluateBuffett(stock),
     evaluateHedgeFund(stock),
-    // 後續加入：
-    // evaluateDalio(stock),
-    // evaluateARK(stock),
-    // evaluateAnalystConsensus(stock),
+    evaluateDalio(stock),
+    evaluateARK(stock),
+    evaluateAnalyst(stock),
   ];
 
   return aggregateVerdicts(stock, verdicts);
@@ -47,7 +44,6 @@ function aggregateVerdicts(
   stock: StockSnapshot,
   verdicts: ExpertVerdict[]
 ): ConsensusResult {
-  // 加權分數
   let weightedSum = 0;
   let totalWeight = 0;
   let bullCount = 0;
@@ -69,26 +65,19 @@ function aggregateVerdicts(
     ? Math.round(weightedSum / totalWeight)
     : 0;
 
-  // ── 共識度計算 ──────────────────────────
-  // 如果所有人同方向 = 100%，完全分歧 = 0%
+  // ── 共識度計算 ──
   const scores = verdicts.map((v) => SIGNAL_SCORES[v.signal]);
   const allSameDirection =
     scores.every((s) => s > 0) || scores.every((s) => s < 0) || scores.every((s) => s === 0);
   const maxSpread = Math.max(...scores) - Math.min(...scores);
-  // 最大可能差距 = 200 (strong_buy vs strong_sell)
   const agreementLevel = allSameDirection
     ? Math.round(100 - (maxSpread / 200) * 30)
     : Math.round(Math.max(0, 100 - (maxSpread / 200) * 100));
 
-  // ── 分歧與共識摘要 ──────────────────────
-
+  // ── 分歧與共識 ──
   const { keyDisagreement, keyAgreement } = findKeyInsights(verdicts);
 
-  // ── 信號轉換 ──────────────────────────
-
   const consensusSignal = scoreToConsensusSignal(consensusScore);
-
-  // ── 建議操作 ──────────────────────────
 
   const suggestedAction = buildSuggestedAction(
     consensusSignal,
@@ -98,8 +87,7 @@ function aggregateVerdicts(
     stock
   );
 
-  // ── 彙整進場價位 ──────────────────────
-
+  // ── 彙整進場價位 ──
   const entryPrices: { label: string; price: number }[] = [];
   for (const v of verdicts) {
     if (v.target_entry != null) {
@@ -109,7 +97,6 @@ function aggregateVerdicts(
       });
     }
   }
-  // 按價格排序
   entryPrices.sort((a, b) => a.price - b.price);
 
   // 取最嚴格的停損
@@ -136,7 +123,7 @@ function aggregateVerdicts(
   };
 }
 
-// ── 找出關鍵分歧與共識 ──────────────────────
+// ── 找出關鍵分歧與共識 ──
 
 function findKeyInsights(verdicts: ExpertVerdict[]): {
   keyDisagreement: string | null;
@@ -146,7 +133,7 @@ function findKeyInsights(verdicts: ExpertVerdict[]): {
     return { keyDisagreement: null, keyAgreement: null };
   }
 
-  // 找分歧：找到信號差異最大的兩位
+  // 找分歧
   let maxDiff = 0;
   let disagreeA: ExpertVerdict | null = null;
   let disagreeB: ExpertVerdict | null = null;
@@ -166,52 +153,46 @@ function findKeyInsights(verdicts: ExpertVerdict[]): {
 
   let keyDisagreement: string | null = null;
   if (disagreeA && disagreeB && maxDiff > 50) {
-    // 找各自最強的正面/負面理由
-    const aTopReason = disagreeA.reasons
-      .sort((a, b) => b.weight - a.weight)[0];
-    const bTopReason = disagreeB.reasons
-      .sort((a, b) => b.weight - a.weight)[0];
+    const aTopReason = [...disagreeA.reasons].sort((a, b) => b.weight - a.weight)[0];
+    const bTopReason = [...disagreeB.reasons].sort((a, b) => b.weight - a.weight)[0];
 
     keyDisagreement =
       `${disagreeA.expert_name_zh}看${SIGNAL_SCORES[disagreeA.signal] > 0 ? "多" : "空"}（主因：${aTopReason?.factor ?? "綜合判斷"}），` +
       `${disagreeB.expert_name_zh}看${SIGNAL_SCORES[disagreeB.signal] > 0 ? "多" : "空"}（主因：${bTopReason?.factor ?? "綜合判斷"}）`;
   }
 
-  // 找共識：所有專家都同意的因子
+  // 找共識
   let keyAgreement: string | null = null;
-  if (verdicts.length >= 2) {
-    // 找所有人評價方向一致的因子
-    const factorMap = new Map<string, Set<string>>();
-    for (const v of verdicts) {
-      for (const r of v.reasons) {
-        if (!factorMap.has(r.factor)) {
-          factorMap.set(r.factor, new Set());
-        }
-        factorMap.get(r.factor)!.add(r.assessment);
+  const factorMap = new Map<string, Set<string>>();
+  for (const v of verdicts) {
+    for (const r of v.reasons) {
+      if (!factorMap.has(r.factor)) {
+        factorMap.set(r.factor, new Set());
+      }
+      factorMap.get(r.factor)!.add(r.assessment);
+    }
+  }
+
+  const agreedFactors: string[] = [];
+  for (const [factor, assessments] of factorMap) {
+    if (assessments.size === 1) {
+      const direction = [...assessments][0];
+      if (direction !== "neutral") {
+        agreedFactors.push(
+          `${factor}${direction === "positive" ? "正面" : "負面"}`
+        );
       }
     }
+  }
 
-    const agreedFactors: string[] = [];
-    for (const [factor, assessments] of factorMap) {
-      if (assessments.size === 1) {
-        const direction = [...assessments][0];
-        if (direction !== "neutral") {
-          agreedFactors.push(
-            `${factor}${direction === "positive" ? "正面" : "負面"}`
-          );
-        }
-      }
-    }
-
-    if (agreedFactors.length > 0) {
-      keyAgreement = `所有專家一致認為：${agreedFactors.slice(0, 3).join("、")}`;
-    }
+  if (agreedFactors.length > 0) {
+    keyAgreement = `所有專家一致認為：${agreedFactors.slice(0, 3).join("、")}`;
   }
 
   return { keyDisagreement, keyAgreement };
 }
 
-// ── 建議操作文字 ──────────────────────────
+// ── 建議操作文字 ──
 
 function buildSuggestedAction(
   signal: ConsensusResult["consensus_signal"],
@@ -222,7 +203,6 @@ function buildSuggestedAction(
 ): string {
   const parts: string[] = [];
 
-  // 主要建議
   if (signal === "strong_buy") {
     parts.push("多數專家看多，可考慮建倉或加碼");
   } else if (signal === "buy") {
@@ -235,7 +215,6 @@ function buildSuggestedAction(
     parts.push("多數專家看空，建議避開或清倉");
   }
 
-  // 共識度提醒
   if (agreement < 40) {
     parts.push("但專家間分歧大，務必謹慎");
   } else if (agreement > 80) {
@@ -245,7 +224,14 @@ function buildSuggestedAction(
     }
   }
 
-  // 分批建議
+  // 看有幾派看多看空
+  const bullExperts = verdicts.filter((v) => SIGNAL_SCORES[v.signal] > 0).map((v) => v.expert_name_zh);
+  const bearExperts = verdicts.filter((v) => SIGNAL_SCORES[v.signal] < 0).map((v) => v.expert_name_zh);
+
+  if (bullExperts.length > 0 && bearExperts.length > 0) {
+    parts.push(`看多：${bullExperts.join("、")}；看空：${bearExperts.join("、")}`);
+  }
+
   const entries = verdicts
     .map((v) => v.target_entry)
     .filter((e): e is number => e != null)
@@ -259,14 +245,12 @@ function buildSuggestedAction(
   return parts.join("。") + "。";
 }
 
-// ── 分數轉信號 ──────────────────────────
-
 function scoreToConsensusSignal(
   score: number
 ): ConsensusResult["consensus_signal"] {
-  if (score >= 50) return "strong_buy";
-  if (score >= 15) return "buy";
-  if (score >= -15) return "hold";
-  if (score >= -50) return "sell";
+  if (score >= 40) return "strong_buy";
+  if (score >= 12) return "buy";
+  if (score >= -12) return "hold";
+  if (score >= -40) return "sell";
   return "strong_sell";
 }
