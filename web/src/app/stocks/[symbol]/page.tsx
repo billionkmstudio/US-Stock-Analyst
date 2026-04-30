@@ -11,6 +11,7 @@ export default async function StockDetailPage({
   const symbol = params.symbol.toUpperCase();
   const supabase = createClient();
 
+  // 拉最近 2 年日線(ALL 模式需要)
   const { data: prices } = await supabase
     .from("daily_prices")
     .select("date, open, high, low, close, volume")
@@ -18,6 +19,7 @@ export default async function StockDetailPage({
     .order("date", { ascending: true })
     .limit(600);
 
+  // 拉指標
   const { data: indicators } = await supabase
     .from("daily_indicators")
     .select("date, sma_20, sma_50, sma_200, bb_upper, bb_middle, bb_lower, rsi_14, macd, macd_signal, macd_histogram")
@@ -25,6 +27,17 @@ export default async function StockDetailPage({
     .order("date", { ascending: true })
     .limit(600);
 
+  // 拉形態訊號（最近 1 年）
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  const { data: patterns } = await supabase
+    .from("pattern_signals")
+    .select("detected_at, pattern_name, pattern_type, confidence, stage, description")
+    .eq("symbol", symbol)
+    .gte("detected_at", oneYearAgo.toISOString().slice(0, 10))
+    .order("detected_at", { ascending: true });
+
+  // 最新基本面
   const { data: fundList } = await supabase
     .from("fundamentals")
     .select("*")
@@ -33,6 +46,8 @@ export default async function StockDetailPage({
     .limit(1);
 
   const fund = fundList?.[0];
+
+  // 最新指標
   const latestInd = indicators?.[indicators.length - 1];
 
   const priceData = (prices || []).map((p) => ({
@@ -58,6 +73,15 @@ export default async function StockDetailPage({
     macd_histogram: d.macd_histogram != null ? Number(d.macd_histogram) : null,
   }));
 
+  const patternData = (patterns || []).map((p) => ({
+    date: typeof p.detected_at === "string" ? p.detected_at.slice(0, 10) : p.detected_at,
+    pattern_name: p.pattern_name as string,
+    pattern_type: p.pattern_type as "bullish" | "bearish" | "neutral",
+    confidence: Number(p.confidence),
+    stage: p.stage as string,
+    description: (p.description as string) || p.pattern_name,
+  }));
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       <Link
@@ -73,15 +97,19 @@ export default async function StockDetailPage({
         </div>
       ) : (
         <>
+          {/* K 線圖 */}
           <div className="mt-4">
             <CandlestickChart
               priceData={priceData}
               indicatorData={indicatorData}
+              patternData={patternData}
               symbol={symbol}
             />
           </div>
 
+          {/* 指標與基本面 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            {/* 技術指標 */}
             {latestInd && (
               <div className="bg-[#0a0e17] border border-gray-800 rounded-xl p-5">
                 <h2 className="text-sm font-medium text-gray-400 mb-4 tracking-wide uppercase">
@@ -103,6 +131,8 @@ export default async function StockDetailPage({
                       : "—"
                   } />
                 </div>
+
+                {/* RSI 狀態條 */}
                 {latestInd.rsi_14 != null && (
                   <div className="mt-4">
                     <div className="flex justify-between text-[10px] text-gray-500 mb-1">
@@ -122,6 +152,8 @@ export default async function StockDetailPage({
                 )}
               </div>
             )}
+
+            {/* 基本面 */}
             {fund && (
               <div className="bg-[#0a0e17] border border-gray-800 rounded-xl p-5">
                 <h2 className="text-sm font-medium text-gray-400 mb-4 tracking-wide uppercase">
@@ -142,6 +174,7 @@ export default async function StockDetailPage({
             )}
           </div>
 
+          {/* 專家策略模擬器 */}
           <div className="mt-6">
             <ExpertSection symbol={symbol} />
           </div>
@@ -150,6 +183,10 @@ export default async function StockDetailPage({
     </div>
   );
 }
+
+// ==============================
+// 小元件
+// ==============================
 
 function Stat({
   label,
@@ -169,6 +206,10 @@ function Stat({
     </div>
   );
 }
+
+// ==============================
+// 格式化工具
+// ==============================
 
 function fmt(v: number | null | undefined, decimals = 2): string {
   if (v == null) return "—";
