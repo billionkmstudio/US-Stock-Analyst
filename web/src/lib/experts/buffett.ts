@@ -6,7 +6,7 @@
 // 對形態：完全忽略
 // ============================================
 
-import type { StockSnapshot, ExpertVerdict, VerdictReason } from "./expert-types";
+import type { StockSnapshot, ExpertVerdict, VerdictReason } from "../expert-types";
 
 const EXPERT_ID = "buffett_value";
 const EXPERT_NAME = "Value Investor";
