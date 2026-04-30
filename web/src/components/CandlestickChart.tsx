@@ -11,6 +11,7 @@ import {
   type CandlestickData,
   type HistogramData,
   type LineData,
+  type SeriesMarker,
   type Time,
 } from "lightweight-charts";
 
@@ -41,9 +42,19 @@ type IndicatorRow = {
   macd_histogram: number | null;
 };
 
+type PatternRow = {
+  date: string;
+  pattern_name: string;
+  pattern_type: "bullish" | "bearish" | "neutral";
+  confidence: number;
+  stage: string;
+  description: string;
+};
+
 type Props = {
   priceData: OHLCVRow[];
   indicatorData: IndicatorRow[];
+  patternData?: PatternRow[];
   symbol: string;
 };
 
@@ -76,13 +87,54 @@ const COLORS = {
   macdSignal: "#f59e0b",
   macdHistUp: "rgba(34,197,94,0.6)",
   macdHistDown: "rgba(239,68,68,0.6)",
+  patternBullish: "#22c55e",
+  patternBearish: "#ef4444",
+  patternNeutral: "#eab308",
+};
+
+// 形態名稱中文對照
+const PATTERN_NAMES_ZH: Record<string, string> = {
+  // K 線形態
+  hammer: "鎚子線",
+  inverted_hammer: "倒鎚子",
+  bullish_engulfing: "看多吞噬",
+  bearish_engulfing: "看空吞噬",
+  morning_star: "晨星",
+  evening_star: "暮星",
+  three_white_soldiers: "三白兵",
+  three_black_crows: "三黑鴉",
+  doji: "十字星",
+  dragonfly_doji: "蜻蜓十字",
+  gravestone_doji: "墓碑十字",
+  spinning_top: "紡錘線",
+  marubozu: "光頭光腳",
+  piercing_line: "穿刺線",
+  dark_cloud_cover: "烏雲蓋頂",
+  harami: "母子線",
+  bullish_harami: "看多母子",
+  bearish_harami: "看空母子",
+  tweezer_top: "鑷子頂",
+  tweezer_bottom: "鑷子底",
+  // 圖形形態
+  head_and_shoulders_top: "頭肩頂",
+  head_and_shoulders_bottom: "頭肩底",
+  double_top: "雙頂（M頭）",
+  double_bottom: "雙底（W底）",
+  ascending_triangle: "上升三角",
+  descending_triangle: "下降三角",
+  symmetric_triangle: "對稱三角",
+  rising_wedge: "上升楔形",
+  falling_wedge: "下降楔形",
+  bull_flag: "多頭旗形",
+  bear_flag: "空頭旗形",
+  cup_and_handle: "杯柄形態",
 };
 
 // ==============================
 // 主元件
 // ==============================
 
-export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
+export function CandlestickChart({ priceData, indicatorData, patternData, symbol }: Props) {
   const mainChartRef = useRef<HTMLDivElement>(null);
   const rsiChartRef = useRef<HTMLDivElement>(null);
   const macdChartRef = useRef<HTMLDivElement>(null);
@@ -90,13 +142,15 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
   const [overlay, setOverlay] = useState<Overlay>("sma");
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(false);
+  const [showPatterns, setShowPatterns] = useState(true);
   const [timeRange, setTimeRange] = useState<"1M" | "3M" | "6M" | "1Y" | "ALL">("6M");
 
   // 根據時間範圍裁切資料
   const filteredData = filterByRange(priceData, timeRange);
   const filteredIndicators = filterByRange(indicatorData, timeRange);
+  const filteredPatterns = patternData ? filterByRange(patternData, timeRange) : [];
 
-  // 主圖(K 線 + 成交量 + 疊加指標)
+  // 主圖(K 線 + 成交量 + 疊加指標 + 形態標注)
   useEffect(() => {
     if (!mainChartRef.current || filteredData.length === 0) return;
 
@@ -150,6 +204,41 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
     }));
     candleSeries.setData(candleData);
 
+    // ── 形態標注 markers ──
+    if (showPatterns && filteredPatterns.length > 0) {
+      // 建立日期→價格查詢表
+      const priceMap = new Map<string, OHLCVRow>();
+      for (const d of filteredData) {
+        priceMap.set(d.date, d);
+      }
+
+      const markers: SeriesMarker<Time>[] = filteredPatterns
+        .filter((p) => p.confidence >= 60)
+        .map((p) => {
+          const priceRow = priceMap.get(p.date);
+          const isBullish = p.pattern_type === "bullish";
+          const isBearish = p.pattern_type === "bearish";
+          const zhName = PATTERN_NAMES_ZH[p.pattern_name] || p.pattern_name;
+
+          return {
+            time: p.date as Time,
+            position: isBullish ? "belowBar" as const : "aboveBar" as const,
+            color: isBullish
+              ? COLORS.patternBullish
+              : isBearish
+                ? COLORS.patternBearish
+                : COLORS.patternNeutral,
+            shape: isBullish ? "arrowUp" as const : isBearish ? "arrowDown" as const : "circle" as const,
+            text: `${zhName} ${p.confidence}%`,
+          };
+        })
+        .sort((a, b) => (a.time as string).localeCompare(b.time as string));
+
+      if (markers.length > 0) {
+        candleSeries.setMarkers(markers);
+      }
+    }
+
     // 成交量(底部 histogram)
     const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: "volume" },
@@ -186,7 +275,7 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-  }, [filteredData, filteredIndicators, overlay]);
+  }, [filteredData, filteredIndicators, filteredPatterns, overlay, showPatterns]);
 
   // RSI 副圖
   useEffect(() => {
@@ -208,7 +297,6 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
       .map((d) => ({ time: d.date as Time, value: d.rsi_14! }));
     rsiSeries.setData(rsiData);
 
-    // 超買超賣線
     addConstantLine(chart, rsiData, 70, COLORS.rsiOverbought);
     addConstantLine(chart, rsiData, 30, COLORS.rsiOversold);
 
@@ -234,7 +322,6 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
 
     const chart = createSubChart(container, 120);
 
-    // MACD histogram
     const histSeries = chart.addHistogramSeries({
       priceFormat: { type: "custom", formatter: (v: number) => v.toFixed(3) },
     });
@@ -247,9 +334,7 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
       }));
     histSeries.setData(histData);
 
-    // MACD line
     addLineSeries(chart, filteredIndicators, "macd", COLORS.macdLine, 2);
-    // Signal line
     addLineSeries(chart, filteredIndicators, "macd_signal", COLORS.macdSignal, 2);
 
     chart.timeScale().fitContent();
@@ -268,6 +353,11 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
   const change = latest && prev ? latest.close - prev.close : 0;
   const changePct = prev ? (change / prev.close) * 100 : 0;
   const isUp = change >= 0;
+
+  // 形態統計
+  const visiblePatterns = filteredPatterns.filter((p) => p.confidence >= 60);
+  const bullishCount = visiblePatterns.filter((p) => p.pattern_type === "bullish").length;
+  const bearishCount = visiblePatterns.filter((p) => p.pattern_type === "bearish").length;
 
   return (
     <div className="bg-[#0a0e17] rounded-xl overflow-hidden border border-gray-800">
@@ -330,7 +420,7 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
         </div>
 
         {/* 副圖開關 */}
-        <div className="flex gap-0.5">
+        <div className="flex gap-0.5 mr-4">
           <button
             onClick={() => setShowRsi(!showRsi)}
             className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${
@@ -352,10 +442,29 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
             MACD
           </button>
         </div>
+
+        {/* 形態標注開關 */}
+        <div className="flex gap-0.5">
+          <button
+            onClick={() => setShowPatterns(!showPatterns)}
+            className={`px-2.5 py-1 text-xs rounded font-medium transition-colors flex items-center gap-1.5 ${
+              showPatterns
+                ? "bg-purple-600/30 text-purple-400"
+                : "text-gray-400 hover:text-gray-200 hover:bg-gray-800"
+            }`}
+          >
+            形態
+            {showPatterns && visiblePatterns.length > 0 && (
+              <span className="text-[10px] opacity-70">
+                {visiblePatterns.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* 圖例說明 */}
-      <div className="px-4 pb-2 flex gap-4 text-[10px] text-gray-500">
+      <div className="px-4 pb-2 flex gap-4 text-[10px] text-gray-500 flex-wrap">
         {overlay === "sma" ? (
           <>
             <span><span className="inline-block w-3 h-0.5 bg-amber-500 mr-1 align-middle" />SMA 20</span>
@@ -366,6 +475,13 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
           <>
             <span><span className="inline-block w-3 h-0.5 bg-amber-500 mr-1 align-middle" />BB Middle</span>
             <span className="text-gray-600">BB Upper / Lower (dashed)</span>
+          </>
+        )}
+        {showPatterns && visiblePatterns.length > 0 && (
+          <>
+            <span className="text-gray-600">|</span>
+            <span className="text-green-500">▲ 看多 {bullishCount}</span>
+            <span className="text-red-500">▼ 看空 {bearishCount}</span>
           </>
         )}
       </div>
@@ -386,6 +502,44 @@ export function CandlestickChart({ priceData, indicatorData, symbol }: Props) {
         <div className="border-t border-gray-800">
           <div className="px-4 py-1 text-[10px] text-gray-500">MACD (12, 26, 9)</div>
           <div ref={macdChartRef} className="w-full" />
+        </div>
+      )}
+
+      {/* 形態清單面板 */}
+      {showPatterns && visiblePatterns.length > 0 && (
+        <div className="border-t border-gray-800 px-4 py-3">
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+            偵測到的形態訊號
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {visiblePatterns
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, 8)
+              .map((p, i) => {
+                const zhName = PATTERN_NAMES_ZH[p.pattern_name] || p.pattern_name;
+                const colorClass =
+                  p.pattern_type === "bullish"
+                    ? "bg-green-900/30 border-green-800 text-green-400"
+                    : p.pattern_type === "bearish"
+                      ? "bg-red-900/30 border-red-800 text-red-400"
+                      : "bg-yellow-900/30 border-yellow-800 text-yellow-400";
+                const arrow =
+                  p.pattern_type === "bullish" ? "▲" : p.pattern_type === "bearish" ? "▼" : "●";
+
+                return (
+                  <div
+                    key={`${p.date}-${p.pattern_name}-${i}`}
+                    className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md border ${colorClass}`}
+                    title={`${p.description}\n日期：${p.date}\n信心度：${p.confidence}%\n階段：${p.stage}`}
+                  >
+                    <span>{arrow}</span>
+                    <span className="font-medium">{zhName}</span>
+                    <span className="opacity-60">{p.confidence}%</span>
+                    <span className="opacity-40 text-[9px]">{p.date.slice(5)}</span>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
     </div>
